@@ -19,7 +19,7 @@ Go models module for representing Go code analysis structures.
 """
 
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class GoPosition(BaseModel):
@@ -107,7 +107,7 @@ class GoCallableDecl(BaseModel):
         qualified_name (str): The fully qualified name (e.g., "package.Receiver.Method").
         name (str): The simple name of the callable.
         signature (str): The full signature string.
-        kind (str): The kind of callable ("function" or "method").
+        kind (str): The kind of callable ("function" or "method"), optional for methods in type_declarations.
         receiver_type (str): For methods, the receiver type name.
         parameters (List[GoParameter]): The function/method parameters.
         results (List[GoResult]): The function/method return values.
@@ -119,13 +119,21 @@ class GoCallableDecl(BaseModel):
     qualified_name: str
     name: str
     signature: str
-    kind: str  # "function" or "method"
+    kind: Optional[str] = None  # Optional for methods inside type_declarations
     receiver_type: Optional[str] = None
-    parameters: List[GoParameter] = Field(default_factory=list)
+    receiver_ptr: Optional[bool] = None
+    parameters: Optional[List[GoParameter]] = Field(default_factory=list)
     results: List[GoResult] = Field(default_factory=list)
     position: Optional[GoPosition] = None
+    end_position: Optional[GoPosition] = None
     documentation: Optional[str] = None
     exported: bool = False
+
+    @field_validator('parameters', mode='before')
+    @classmethod
+    def convert_null_parameters(cls, v):
+        """Convert null parameters to empty list."""
+        return v if v is not None else []
 
 
 class GoTypeDecl(BaseModel):
