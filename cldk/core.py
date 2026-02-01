@@ -27,6 +27,7 @@ from typing import List
 
 from cldk.analysis import AnalysisLevel
 from cldk.analysis.c import CAnalysis
+from cldk.analysis.go import GoAnalysis
 from cldk.analysis.java import JavaAnalysis
 from cldk.analysis.commons.treesitter import TreesitterJava
 from cldk.analysis.python.python_analysis import PythonAnalysis
@@ -61,7 +62,7 @@ class CLDK:
         target_files: List[str] | None = None,
         analysis_backend_path: str | None = None,
         analysis_json_path: str | Path = None,
-    ) -> JavaAnalysis | PythonAnalysis | CAnalysis:
+    ) -> JavaAnalysis | PythonAnalysis | CAnalysis | GoAnalysis:
         """Initialize a language-specific analysis façade.
 
         Args:
@@ -74,7 +75,7 @@ class CLDK:
             analysis_json_path (str | Path | None): Path to persist analysis database.
 
         Returns:
-            JavaAnalysis | PythonAnalysis | CAnalysis: Initialized analysis façade for the chosen language.
+            JavaAnalysis | PythonAnalysis | CAnalysis | GoAnalysis: Initialized analysis façade for the chosen language.
 
         Raises:
             CldkInitializationException: If both or neither of project_path and source_code are provided.
@@ -114,6 +115,15 @@ class CLDK:
             )
         elif self.language == "c":
             return CAnalysis(project_dir=project_path)
+        elif self.language == "go":
+            return GoAnalysis(
+                project_dir=project_path,
+                source_code=source_code,
+                analysis_level=analysis_level,
+                analysis_backend_path=analysis_backend_path,
+                analysis_json_path=analysis_json_path,
+                eager_analysis=eager,
+            )
         else:
             raise NotImplementedError(f"Analysis support for {self.language} is not implemented yet.")
 
