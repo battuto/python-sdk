@@ -80,11 +80,11 @@ class GoParameter(BaseModel):
     """Represents a parameter in a Go function/method signature.
 
     Attributes:
-        name (str): The parameter name.
+        name (str): The parameter name (may be empty for unnamed parameters).
         type (str): The parameter type.
     """
 
-    name: str
+    name: Optional[str] = None
     type: str
 
 

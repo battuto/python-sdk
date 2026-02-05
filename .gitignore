@@ -55,9 +55,13 @@ __pycache__/
 *.py[cod]
 .python-version
 .venv/
+venv/
 
 # Build files
 dist/
+
+# CLDK output files
+.cldk_output/
 
 # Lock files
 poetry.lock
