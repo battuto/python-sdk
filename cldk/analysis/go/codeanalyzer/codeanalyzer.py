@@ -19,8 +19,11 @@
 import json
 import logging
 import os
+import platform
 import shlex
 import subprocess
+import sys
+from importlib import resources
 from pathlib import Path
 from typing import Dict, List, Optional, Union
 
@@ -63,6 +66,7 @@ class GCodeanalyzer:
         cg_algorithm: str = "cha",
         only_pkg: Optional[str] = None,
         emit_positions: str = "detailed",
+        include_body: bool = False,
     ) -> None:
         """Initialize the GCodeanalyzer."""
         self.project_dir = Path(project_dir) if project_dir else None
@@ -76,6 +80,7 @@ class GCodeanalyzer:
         self.cg_algorithm = cg_algorithm
         self.only_pkg = only_pkg
         self.emit_positions = emit_positions
+        self.include_body = include_body
 
         # Initialize analysis
         self.application: Optional[GoAnalysis] = None
@@ -87,13 +92,19 @@ class GCodeanalyzer:
     def _get_codeanalyzer_exec(self) -> str:
         """Get the path to the codeanalyzer-go executable.
 
+        Resolution order:
+        1. Explicitly provided ``analysis_backend_path``
+        2. Bundled binary shipped inside the CLDK package
+        3. ``codeanalyzer-go`` on the system PATH
+        4. ``CODEANALYZER_GO_PATH`` environment variable
+
         Returns:
             str: The path to the codeanalyzer-go executable.
 
         Raises:
             CodeanalyzerExecutionException: If the executable cannot be found.
         """
-        # If analysis_backend_path is provided, use it
+        # 1. If analysis_backend_path is provided, use it
         if self.analysis_backend_path:
             if self.analysis_backend_path.exists() and self.analysis_backend_path.is_file():
                 return str(self.analysis_backend_path)
@@ -102,16 +113,19 @@ class GCodeanalyzer:
                     f"Provided codeanalyzer-go path does not exist: {self.analysis_backend_path}"
                 )
 
-        # Try to find codeanalyzer-go in PATH
+        # 2. Try bundled binary (same pattern as Java JAR)
+        bundled_path = self._get_bundled_binary()
+        if bundled_path:
+            return bundled_path
+
+        # 3. Try to find codeanalyzer-go in PATH
         codeanalyzer_go = "codeanalyzer-go.exe" if os.name == "nt" else "codeanalyzer-go"
-        
-        # Check if it's in PATH
         from shutil import which
         exec_path = which(codeanalyzer_go)
         if exec_path:
             return exec_path
 
-        # Check environment variable
+        # 4. Check environment variable
         env_path = os.getenv("CODEANALYZER_GO_PATH")
         if env_path and Path(env_path).exists():
             return env_path
@@ -120,6 +134,40 @@ class GCodeanalyzer:
             "codeanalyzer-go executable not found. Please provide analysis_backend_path, "
             "add it to PATH, or set CODEANALYZER_GO_PATH environment variable."
         )
+
+    def _get_bundled_binary(self) -> Optional[str]:
+        """Resolve the platform-specific bundled codeanalyzer-go binary.
+
+        Returns:
+            str | None: Path to the bundled binary if it exists, None otherwise.
+        """
+        system = platform.system().lower()   # "windows", "linux", "darwin"
+        machine = platform.machine().lower() # "amd64", "x86_64", "arm64", "aarch64"
+
+        # Normalize machine name
+        if machine in ("x86_64", "amd64"):
+            machine = "amd64"
+        elif machine in ("aarch64", "arm64"):
+            machine = "arm64"
+
+        suffix = ".exe" if system == "windows" else ""
+        binary_name = f"codeanalyzer-go-{system}-{machine}{suffix}"
+
+        try:
+            with resources.as_file(
+                resources.files("cldk.analysis.go.codeanalyzer.bin")
+            ) as bin_path:
+                bundled = bin_path / binary_name
+                if bundled.exists():
+                    # Ensure the binary is executable on Unix
+                    if system != "windows":
+                        bundled.chmod(0o755)
+                    logger.info(f"Using bundled codeanalyzer-go binary: {bundled}")
+                    return str(bundled)
+        except Exception as e:
+            logger.debug(f"Could not resolve bundled binary: {e}")
+
+        return None
 
     def _build_command(self, output_dir: Path) -> List[str]:
         """Build the command to execute codeanalyzer-go.
@@ -165,6 +213,10 @@ class GCodeanalyzer:
 
         # Emit positions
         cmd.extend(["--emit-positions", self.emit_positions])
+
+        # Include body (enables call_examples)
+        if self.include_body:
+            cmd.append("--include-body")
 
         # Output format
         cmd.extend(["--format", "json"])

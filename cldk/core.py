@@ -62,6 +62,7 @@ class CLDK:
         target_files: List[str] | None = None,
         analysis_backend_path: str | None = None,
         analysis_json_path: str | Path = None,
+        include_body: bool = False,
     ) -> JavaAnalysis | PythonAnalysis | CAnalysis | GoAnalysis:
         """Initialize a language-specific analysis façade.
 
@@ -123,6 +124,7 @@ class CLDK:
                 analysis_backend_path=analysis_backend_path,
                 analysis_json_path=analysis_json_path,
                 eager_analysis=eager,
+                include_body=include_body,
             )
         else:
             raise NotImplementedError(f"Analysis support for {self.language} is not implemented yet.")

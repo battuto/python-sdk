@@ -100,6 +100,36 @@ class GoResult(BaseModel):
     type: str
 
 
+class GoInterfaceMethod(BaseModel):
+    """Represents a method signature declared inside a Go interface type.
+
+    Attributes:
+        name (str): The method name.
+        signature (str): The full method signature (e.g., "Start(string) error").
+        parameters (List[GoParameter]): Input parameters with name and type.
+        results (List[GoParameter]): Return values with name and type.
+        documentation (str): Documentation comment on the method.
+    """
+
+    name: str
+    signature: str
+    parameters: List[GoParameter] = Field(default_factory=list)
+    results: List[GoParameter] = Field(default_factory=list)
+    documentation: Optional[str] = None
+
+    @field_validator('parameters', mode='before')
+    @classmethod
+    def convert_null_parameters(cls, v):
+        """Convert null parameters to empty list."""
+        return v if v is not None else []
+
+    @field_validator('results', mode='before')
+    @classmethod
+    def convert_null_results(cls, v):
+        """Convert null results to empty list."""
+        return v if v is not None else []
+
+
 class GoCallableDecl(BaseModel):
     """Represents a callable declaration (function or method) in Go.
 
@@ -128,6 +158,7 @@ class GoCallableDecl(BaseModel):
     end_position: Optional[GoPosition] = None
     documentation: Optional[str] = None
     exported: bool = False
+    call_examples: Optional[List[str]] = None
 
     @field_validator('parameters', mode='before')
     @classmethod
@@ -158,6 +189,7 @@ class GoTypeDecl(BaseModel):
     documentation: Optional[str] = None
     fields: List[GoField] = Field(default_factory=list)
     methods: Dict[str, GoCallableDecl] = Field(default_factory=dict)
+    interface_methods: Optional[List[GoInterfaceMethod]] = None
     exported: bool = False
     underlying_type: Optional[str] = None
 
@@ -178,6 +210,7 @@ class GoPackage(BaseModel):
 
     path: str
     name: str
+    documentation: Optional[str] = None
     files: List[str] = Field(default_factory=list)
     imports: List[GoImport] = Field(default_factory=list)
     type_declarations: Dict[str, GoTypeDecl] = Field(default_factory=dict)

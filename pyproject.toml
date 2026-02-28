@@ -24,7 +24,8 @@ classifiers = [
 ]
 include = [
     "LICENSE",
-    "cldk/analysis/java/codeanalyzer/jar/*.jar"
+    "cldk/analysis/java/codeanalyzer/jar/*.jar",
+    "cldk/analysis/go/codeanalyzer/bin/codeanalyzer-go-*"
 ]
 
 [tool.backend-versions]

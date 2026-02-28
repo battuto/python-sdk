@@ -53,6 +53,7 @@ class GoAnalysis:
         cg_algorithm: str = "cha",
         only_pkg: Optional[str] = None,
         emit_positions: str = "detailed",
+        include_body: bool = False,
     ) -> None:
         """Initialize the Go analysis backend.
 
@@ -80,6 +81,7 @@ class GoAnalysis:
         self.cg_algorithm = cg_algorithm
         self.only_pkg = only_pkg
         self.emit_positions = emit_positions
+        self.include_body = include_body
 
         # Initialize the analysis backend
         self.backend: GCodeanalyzer = GCodeanalyzer(
@@ -94,6 +96,7 @@ class GoAnalysis:
             cg_algorithm=self.cg_algorithm,
             only_pkg=self.only_pkg,
             emit_positions=self.emit_positions,
+            include_body=self.include_body,
         )
 
     def get_application_view(self) -> GoAnalysisModel:
