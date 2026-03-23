@@ -67,6 +67,7 @@ class GCodeanalyzer:
         only_pkg: Optional[str] = None,
         emit_positions: str = "detailed",
         include_body: bool = False,
+        compact: bool = False,
     ) -> None:
         """Initialize the GCodeanalyzer."""
         self.project_dir = Path(project_dir) if project_dir else None
@@ -81,13 +82,18 @@ class GCodeanalyzer:
         self.only_pkg = only_pkg
         self.emit_positions = emit_positions
         self.include_body = include_body
+        self.compact = compact
 
         # Initialize analysis
         self.application: Optional[GoAnalysis] = None
+        self._compact_data: Optional[Dict] = None
         self.call_graph: Optional[nx.DiGraph] = None
 
         if self.source_code is None and self.project_dir:
-            self._init_codeanalyzer()
+            if self.compact:
+                self._init_compact_analysis()
+            else:
+                self._init_codeanalyzer()
 
     def _get_codeanalyzer_exec(self) -> str:
         """Get the path to the codeanalyzer-go executable.
@@ -217,6 +223,10 @@ class GCodeanalyzer:
         # Include body (enables call_examples)
         if self.include_body:
             cmd.append("--include-body")
+
+        # Compact mode (LLM-optimized output)
+        if self.compact:
+            cmd.append("--compact")
 
         # Output format
         cmd.extend(["--format", "json"])
@@ -407,3 +417,43 @@ class GCodeanalyzer:
         if app.call_graph:
             return app.call_graph.model_dump_json(indent=2)
         return "{}"
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Compact mode support
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def _init_compact_analysis(self) -> Dict:
+        """Run analysis in compact mode and store raw dict (no Pydantic validation).
+
+        Returns:
+            Dict: The raw compact JSON data.
+        """
+        if self._compact_data is not None and not self.eager_analysis:
+            return self._compact_data
+
+        analysis_json_path = self._run_analysis()
+        try:
+            with open(analysis_json_path, "r", encoding="utf-8") as f:
+                self._compact_data = json.load(f)
+            logger.info("Successfully loaded compact analysis JSON")
+        except Exception as e:
+            logger.error(f"Failed to parse compact analysis.json: {e}")
+            raise CodeanalyzerExecutionException(
+                f"Failed to parse compact analysis.json: {e}"
+            ) from e
+
+        return self._compact_data
+
+    def get_compact_view(self) -> Dict:
+        """Return the compact analysis data as a raw dictionary.
+
+        The compact output uses abbreviated keys (p, n, d, c, e, etc.)
+        optimized for LLM consumption. This bypasses Pydantic validation
+        since the compact schema differs from the standard one.
+
+        Returns:
+            Dict: The raw compact JSON data.
+        """
+        if self._compact_data is None:
+            self._compact_data = self._init_compact_analysis()
+        return self._compact_data

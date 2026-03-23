@@ -32,6 +32,23 @@ from cldk.models.go.models import (
     GoResult,
     GoSymbolTable,
     GoTypeDecl,
+    # PDG models
+    GoPDGPosition,
+    GoPDGNode,
+    GoPDGDataEdge,
+    GoPDGCtrlEdge,
+    GoFunctionPDG,
+    GoPackagePDG,
+    GoCLDKPDG,
+    # SDG models
+    GoSDGInterEdge,
+    GoPackageSDG,
+    GoCLDKSDG,
+    # Compact models
+    CompactGoPackagePDG,
+    CompactGoPDG,
+    CompactGoPackageSDG,
+    CompactGoSDG,
 )
 
 __all__ = [
@@ -50,4 +67,22 @@ __all__ = [
     "GoResult",
     "GoSymbolTable",
     "GoTypeDecl",
+    # PDG
+    "GoPDGPosition",
+    "GoPDGNode",
+    "GoPDGDataEdge",
+    "GoPDGCtrlEdge",
+    "GoFunctionPDG",
+    "GoPackagePDG",
+    "GoCLDKPDG",
+    # SDG
+    "GoSDGInterEdge",
+    "GoPackageSDG",
+    "GoCLDKSDG",
+    # Compact
+    "CompactGoPackagePDG",
+    "CompactGoPDG",
+    "CompactGoPackageSDG",
+    "CompactGoSDG",
 ]
+

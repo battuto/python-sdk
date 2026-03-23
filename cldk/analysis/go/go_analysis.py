@@ -28,7 +28,12 @@ from cldk.analysis.go.codeanalyzer import GCodeanalyzer
 from cldk.models.go.models import (
     GoAnalysis as GoAnalysisModel,
     GoCallableDecl,
+    GoCLDKPDG,
+    GoCLDKSDG,
+    GoFunctionPDG,
     GoPackage,
+    GoPackagePDG,
+    GoPackageSDG,
     GoTypeDecl,
 )
 
@@ -54,6 +59,7 @@ class GoAnalysis:
         only_pkg: Optional[str] = None,
         emit_positions: str = "detailed",
         include_body: bool = False,
+        compact: bool = False,
     ) -> None:
         """Initialize the Go analysis backend.
 
@@ -69,6 +75,7 @@ class GoAnalysis:
             cg_algorithm (str): Call graph algorithm ("cha" or "rta").
             only_pkg (str | None): Only analyze packages matching this filter.
             emit_positions (str): Position detail level ("detailed" or "minimal").
+            compact (bool): If True, run analysis in compact (LLM-optimized) mode.
         """
         self.project_dir = project_dir
         self.source_code = source_code
@@ -82,6 +89,7 @@ class GoAnalysis:
         self.only_pkg = only_pkg
         self.emit_positions = emit_positions
         self.include_body = include_body
+        self.compact = compact
 
         # Initialize the analysis backend
         self.backend: GCodeanalyzer = GCodeanalyzer(
@@ -97,6 +105,7 @@ class GoAnalysis:
             only_pkg=self.only_pkg,
             emit_positions=self.emit_positions,
             include_body=self.include_body,
+            compact=self.compact,
         )
 
     def get_application_view(self) -> GoAnalysisModel:
@@ -359,3 +368,69 @@ class GoAnalysis:
                 stats["methods"] += len(type_decl.methods)
 
         return stats
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # PDG / SDG helpers
+    # ──────────────────────────────────────────────────────────────────────────
+
+    def get_pdg(
+        self,
+        package: Optional[str] = None,
+        function: Optional[str] = None,
+    ) -> Union[GoCLDKPDG, GoPackagePDG, GoFunctionPDG, None]:
+        """Return the PDG for the entire app, a specific package, or a specific function.
+
+        Args:
+            package (str | None): Package path to filter by.
+            function (str | None): Function name to filter by (requires package).
+
+        Returns:
+            GoCLDKPDG | GoPackagePDG | GoFunctionPDG | None
+        """
+        app = self.get_application_view()
+        if app.pdg is None:
+            return None
+
+        if package is None:
+            return app.pdg
+
+        pkg_pdg = app.pdg.packages.get(package)
+        if pkg_pdg is None:
+            return None
+
+        if function is None:
+            return pkg_pdg
+
+        return pkg_pdg.functions.get(function)
+
+    def get_sdg(
+        self,
+        caller_package: Optional[str] = None,
+    ) -> Union[GoCLDKSDG, GoPackageSDG, None]:
+        """Return the SDG for the entire app, or outgoing edges for a specific package.
+
+        Args:
+            caller_package (str | None): Package path to filter by.
+
+        Returns:
+            GoCLDKSDG | GoPackageSDG | None
+        """
+        app = self.get_application_view()
+        if app.sdg is None:
+            return None
+
+        if caller_package is None:
+            return app.sdg
+
+        return app.sdg.packages.get(caller_package)
+
+    def get_compact_view(self) -> Dict:
+        """Return the compact analysis data as a raw dictionary.
+
+        Delegates to the backend's compact analysis. Only available when
+        the GoAnalysis was initialized with compact=True.
+
+        Returns:
+            Dict: The raw compact JSON data.
+        """
+        return self.backend.get_compact_view()

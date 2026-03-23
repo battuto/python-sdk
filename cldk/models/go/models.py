@@ -18,7 +18,7 @@
 Go models module for representing Go code analysis structures.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -218,6 +218,14 @@ class GoPackage(BaseModel):
     variables: Dict[str, Any] = Field(default_factory=dict)
     constants: Dict[str, Any] = Field(default_factory=dict)
 
+    # Package-level metadata for malware/security analysis
+    has_init: bool = False
+    has_goroutines: bool = False
+    reads_env: bool = False
+    build_tags: List[str] = Field(default_factory=list)
+    used_by_packages: List[str] = Field(default_factory=list)
+    reachable_from_main: bool = False
+
 
 class GoSymbolTable(BaseModel):
     """Represents the symbol table for a Go project.
@@ -321,6 +329,130 @@ class GoIssue(BaseModel):
     position: Optional[GoPosition] = None
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# PDG (Program Dependence Graph) Models — Standard Schema
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class GoPDGPosition(BaseModel):
+    """Position of a PDG node in source code."""
+
+    file: str
+    line: int
+    column: int
+
+
+class GoPDGNode(BaseModel):
+    """A node in a function-level PDG."""
+
+    id: int
+    kind: str
+    instr: str
+    position: Optional[GoPDGPosition] = None
+    target: Optional[str] = None
+
+
+class GoPDGDataEdge(BaseModel):
+    """A data-dependency edge in a PDG."""
+
+    source: int
+    target: int
+    var: str
+
+
+class GoPDGCtrlEdge(BaseModel):
+    """A control-dependency edge in a PDG."""
+
+    source: int
+    target: int
+    condition: str
+
+
+class GoFunctionPDG(BaseModel):
+    """PDG for a single function."""
+
+    nodes: List[GoPDGNode] = Field(default_factory=list)
+    data_edges: List[GoPDGDataEdge] = Field(default_factory=list)
+    control_edges: List[GoPDGCtrlEdge] = Field(default_factory=list)
+
+
+class GoPackagePDG(BaseModel):
+    """PDG data for all functions in a package."""
+
+    functions: Dict[str, GoFunctionPDG] = Field(default_factory=dict)
+
+
+class GoCLDKPDG(BaseModel):
+    """Top-level PDG container for the entire project."""
+
+    packages: Dict[str, GoPackagePDG] = Field(default_factory=dict)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# SDG (System Dependence Graph) Models — Standard Schema
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class GoSDGInterEdge(BaseModel):
+    """An inter-procedural edge in the SDG."""
+
+    kind: str
+    caller_func: str
+    callee_func: str
+    caller_node: int
+    callee_node: int
+    param_index: Optional[int] = None
+    var: Optional[str] = None
+
+
+class GoPackageSDG(BaseModel):
+    """SDG data for a package (inter-procedural edges)."""
+
+    inter_edges: List[GoSDGInterEdge] = Field(default_factory=list)
+
+
+class GoCLDKSDG(BaseModel):
+    """Top-level SDG container for the entire project."""
+
+    packages: Dict[str, GoPackageSDG] = Field(default_factory=dict)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Compact Models — LLM-Optimized (abbreviated keys from --compact output)
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+class CompactGoPackagePDG(BaseModel):
+    """Compact PDG for a single function (abbreviated keys: n=nodes, d=data_edges, c=ctrl_edges)."""
+
+    n: List[List[Union[int, str]]] = Field(default_factory=list)
+    d: List[List[Union[int, str]]] = Field(default_factory=list)
+    c: List[List[Union[int, str]]] = Field(default_factory=list)
+
+
+class CompactGoPDG(BaseModel):
+    """Compact PDG container. Structure: p -> {package -> {function -> CompactGoPackagePDG}}."""
+
+    p: Dict[str, Dict[str, CompactGoPackagePDG]] = Field(default_factory=dict)
+
+
+class CompactGoPackageSDG(BaseModel):
+    """Compact SDG for a package (abbreviated key: e=edges)."""
+
+    e: List[List[str]] = Field(default_factory=list)
+
+
+class CompactGoSDG(BaseModel):
+    """Compact SDG container. Structure: p -> {package -> CompactGoPackageSDG}."""
+
+    p: Dict[str, CompactGoPackageSDG] = Field(default_factory=dict)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Top-level analysis model
+# ──────────────────────────────────────────────────────────────────────────────
+
+
 class GoAnalysis(BaseModel):
     """Represents the complete Go code analysis result.
 
@@ -328,14 +460,14 @@ class GoAnalysis(BaseModel):
         metadata (GoMetadata): Metadata about the analysis.
         symbol_table (GoSymbolTable): The symbol table.
         call_graph (GoCallGraph): The call graph (if requested).
-        pdg (Any): Program Dependence Graph (placeholder for future use).
-        sdg (Any): System Dependence Graph (placeholder for future use).
+        pdg (GoCLDKPDG): Program Dependence Graph.
+        sdg (GoCLDKSDG): System Dependence Graph.
         issues (List[GoIssue]): Issues/diagnostics found during analysis.
     """
 
     metadata: GoMetadata
     symbol_table: Optional[GoSymbolTable] = None
     call_graph: Optional[GoCallGraph] = None
-    pdg: Optional[Any] = None
-    sdg: Optional[Any] = None
+    pdg: Optional[GoCLDKPDG] = None
+    sdg: Optional[GoCLDKSDG] = None
     issues: List[GoIssue] = Field(default_factory=list)
