@@ -21,6 +21,8 @@ from cldk.models.go.models import (
     GoCallGraph,
     GoCallGraphEdge,
     GoCallGraphNode,
+    GoCallableBody,
+    GoCallableBodyCallSite,
     GoCallableDecl,
     GoField,
     GoImport,
@@ -44,11 +46,6 @@ from cldk.models.go.models import (
     GoSDGInterEdge,
     GoPackageSDG,
     GoCLDKSDG,
-    # Compact models
-    CompactGoPackagePDG,
-    CompactGoPDG,
-    CompactGoPackageSDG,
-    CompactGoSDG,
 )
 
 __all__ = [
@@ -56,6 +53,8 @@ __all__ = [
     "GoCallGraph",
     "GoCallGraphEdge",
     "GoCallGraphNode",
+    "GoCallableBody",
+    "GoCallableBodyCallSite",
     "GoCallableDecl",
     "GoField",
     "GoImport",
@@ -79,10 +78,6 @@ __all__ = [
     "GoSDGInterEdge",
     "GoPackageSDG",
     "GoCLDKSDG",
-    # Compact
-    "CompactGoPackagePDG",
-    "CompactGoPDG",
-    "CompactGoPackageSDG",
-    "CompactGoSDG",
 ]
+
 

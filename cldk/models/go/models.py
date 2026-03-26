@@ -130,6 +130,30 @@ class GoInterfaceMethod(BaseModel):
         return v if v is not None else []
 
 
+class GoCallableBodyCallSite(BaseModel):
+    """Represents a call site observed inside a callable body summary."""
+
+    target: Optional[str] = None
+    position: Optional[GoPosition] = None
+    kind: Optional[str] = None
+
+
+class GoCallableBody(BaseModel):
+    """Represents body span metadata for a callable declaration."""
+
+    start_line: Optional[int] = None
+    end_line: Optional[int] = None
+    line_count: Optional[int] = None
+    file: Optional[str] = None
+    call_sites: List[GoCallableBodyCallSite] = Field(default_factory=list)
+
+    @field_validator("call_sites", mode="before")
+    @classmethod
+    def convert_null_call_sites(cls, v):
+        """Convert null call_sites to empty list."""
+        return v if v is not None else []
+
+
 class GoCallableDecl(BaseModel):
     """Represents a callable declaration (function or method) in Go.
 
@@ -156,6 +180,7 @@ class GoCallableDecl(BaseModel):
     results: List[GoResult] = Field(default_factory=list)
     position: Optional[GoPosition] = None
     end_position: Optional[GoPosition] = None
+    body: Optional[GoCallableBody] = None
     documentation: Optional[str] = None
     exported: bool = False
     call_examples: Optional[List[str]] = None
@@ -222,9 +247,9 @@ class GoPackage(BaseModel):
     has_init: bool = False
     has_goroutines: bool = False
     reads_env: bool = False
-    build_tags: List[str] = Field(default_factory=list)
+    uses_reflection: bool = False
+    uses_unsafe: bool = False
     used_by_packages: List[str] = Field(default_factory=list)
-    reachable_from_main: bool = False
 
 
 class GoSymbolTable(BaseModel):
@@ -269,10 +294,12 @@ class GoCallGraphEdge(BaseModel):
         position (GoPosition): The position of the call site in the source code.
     """
 
+    model_config = {"populate_by_name": True}
+
     source: str
     target: str
-    kind: str
-    position: Optional[GoPosition] = None
+    kind: Optional[str] = None
+    position: Optional[GoPosition] = Field(default=None, alias="call_site")
 
 
 class GoCallGraph(BaseModel):
@@ -355,17 +382,21 @@ class GoPDGNode(BaseModel):
 class GoPDGDataEdge(BaseModel):
     """A data-dependency edge in a PDG."""
 
-    source: int
-    target: int
+    source: int = Field(alias="from")
+    target: int = Field(alias="to")
     var: str
+
+    model_config = {"populate_by_name": True}
 
 
 class GoPDGCtrlEdge(BaseModel):
     """A control-dependency edge in a PDG."""
 
-    source: int
-    target: int
+    source: int = Field(alias="from")
+    target: int = Field(alias="to")
     condition: str
+
+    model_config = {"populate_by_name": True}
 
 
 class GoFunctionPDG(BaseModel):
@@ -416,36 +447,6 @@ class GoCLDKSDG(BaseModel):
 
     packages: Dict[str, GoPackageSDG] = Field(default_factory=dict)
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Compact Models — LLM-Optimized (abbreviated keys from --compact output)
-# ──────────────────────────────────────────────────────────────────────────────
-
-
-class CompactGoPackagePDG(BaseModel):
-    """Compact PDG for a single function (abbreviated keys: n=nodes, d=data_edges, c=ctrl_edges)."""
-
-    n: List[List[Union[int, str]]] = Field(default_factory=list)
-    d: List[List[Union[int, str]]] = Field(default_factory=list)
-    c: List[List[Union[int, str]]] = Field(default_factory=list)
-
-
-class CompactGoPDG(BaseModel):
-    """Compact PDG container. Structure: p -> {package -> {function -> CompactGoPackagePDG}}."""
-
-    p: Dict[str, Dict[str, CompactGoPackagePDG]] = Field(default_factory=dict)
-
-
-class CompactGoPackageSDG(BaseModel):
-    """Compact SDG for a package (abbreviated key: e=edges)."""
-
-    e: List[List[str]] = Field(default_factory=list)
-
-
-class CompactGoSDG(BaseModel):
-    """Compact SDG container. Structure: p -> {package -> CompactGoPackageSDG}."""
-
-    p: Dict[str, CompactGoPackageSDG] = Field(default_factory=dict)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

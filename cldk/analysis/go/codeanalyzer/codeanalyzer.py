@@ -20,17 +20,24 @@ import json
 import logging
 import os
 import platform
+import re
 import shlex
 import subprocess
 import sys
 from importlib import resources
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import networkx as nx
 
 from cldk.analysis import AnalysisLevel
-from cldk.models.go.models import GoAnalysis, GoCallGraph, GoPackage, GoSymbolTable
+from cldk.models.go.models import (
+    GoAnalysis,
+    GoCallGraph,
+    GoCallableDecl,
+    GoPackage,
+    GoSymbolTable,
+)
 from cldk.utils.exceptions.exceptions import CodeanalyzerExecutionException
 
 logger = logging.getLogger(__name__)
@@ -67,7 +74,6 @@ class GCodeanalyzer:
         only_pkg: Optional[str] = None,
         emit_positions: str = "detailed",
         include_body: bool = False,
-        compact: bool = False,
     ) -> None:
         """Initialize the GCodeanalyzer."""
         self.project_dir = Path(project_dir) if project_dir else None
@@ -82,18 +88,13 @@ class GCodeanalyzer:
         self.only_pkg = only_pkg
         self.emit_positions = emit_positions
         self.include_body = include_body
-        self.compact = compact
 
         # Initialize analysis
         self.application: Optional[GoAnalysis] = None
-        self._compact_data: Optional[Dict] = None
         self.call_graph: Optional[nx.DiGraph] = None
 
         if self.source_code is None and self.project_dir:
-            if self.compact:
-                self._init_compact_analysis()
-            else:
-                self._init_codeanalyzer()
+            self._init_codeanalyzer()
 
     def _get_codeanalyzer_exec(self) -> str:
         """Get the path to the codeanalyzer-go executable.
@@ -224,10 +225,6 @@ class GCodeanalyzer:
         if self.include_body:
             cmd.append("--include-body")
 
-        # Compact mode (LLM-optimized output)
-        if self.compact:
-            cmd.append("--compact")
-
         # Output format
         cmd.extend(["--format", "json"])
 
@@ -307,6 +304,194 @@ class GCodeanalyzer:
             raise CodeanalyzerExecutionException(
                 f"Failed to parse analysis.json: {e}"
             ) from e
+
+    def _normalize_function_signature(self, func_signature: str) -> str:
+        """Normalize a possibly fully-qualified function signature.
+
+        Examples:
+            "(*pkg/path.Type).Method$1" -> "(*Type).Method"
+            "pkg/path.Func" -> "pkg/path.Func" (unchanged)
+        """
+        func_short = func_signature
+
+        # Strip closure suffixes emitted by CapsLock ("$1", "$2", ...)
+        if "$" in func_short:
+            func_short = func_short.split("$", maxsplit=1)[0]
+
+        # Normalize receiver names that include package path.
+        # Example: "(*github.com/user/repo/pkg.Type).Method" -> "(*Type).Method"
+        match = re.search(r"\(\*?[^)]+\.([^)]+)\)\.(.+)", func_short)
+        if match:
+            type_name = match.group(1)
+            method_name = match.group(2)
+            has_ptr = "(*" in func_short
+            return f"(*{type_name}).{method_name}" if has_ptr else f"({type_name}).{method_name}"
+
+        return func_short
+
+    def _find_callable_decl(self, pkg: GoPackage, func_short: str) -> Optional[GoCallableDecl]:
+        """Find a callable declaration in a package by normalized function/method signature."""
+        # Search top-level callable declarations
+        for qname, callable_decl in pkg.callable_declarations.items():
+            if qname.endswith("." + func_short) or callable_decl.name == func_short:
+                return callable_decl
+            if qname.endswith(func_short):
+                return callable_decl
+
+        # Search methods inside type declarations
+        for type_decl in pkg.type_declarations.values():
+            for qname, method_decl in type_decl.methods.items():
+                if qname.endswith("." + func_short) or method_decl.name == func_short:
+                    return method_decl
+                if qname.endswith(func_short):
+                    return method_decl
+
+        return None
+
+    def _resolve_source_file(
+        self,
+        pkg: GoPackage,
+        callable_decl: GoCallableDecl,
+    ) -> Optional[Path]:
+        """Resolve source file path for a callable declaration."""
+        candidate_files: List[str] = []
+
+        if callable_decl.position and callable_decl.position.file:
+            candidate_files.append(callable_decl.position.file)
+        if callable_decl.end_position and callable_decl.end_position.file:
+            candidate_files.append(callable_decl.end_position.file)
+
+        if callable_decl.body:
+            if callable_decl.body.file:
+                candidate_files.append(callable_decl.body.file)
+            for call_site in callable_decl.body.call_sites:
+                if call_site.position and call_site.position.file:
+                    candidate_files.append(call_site.position.file)
+                    break
+
+        for file_path in candidate_files:
+            source_file = Path(file_path)
+            if not source_file.is_absolute():
+                if self.project_dir is None:
+                    continue
+                source_file = Path(self.project_dir) / source_file
+            if source_file.exists():
+                return source_file
+
+        # If the package contains exactly one file, use it as a safe fallback.
+        if len(pkg.files) == 1:
+            source_file = Path(pkg.files[0])
+            if not source_file.is_absolute():
+                if self.project_dir is None:
+                    return None
+                source_file = Path(self.project_dir) / source_file
+            if source_file.exists():
+                return source_file
+
+        # Heuristic fallback for multi-file packages: locate declaration by pattern.
+        if callable_decl.name:
+            if callable_decl.receiver_type:
+                decl_pattern = re.compile(
+                    rf"\bfunc\s*\(\s*[^)]*\*?\s*{re.escape(callable_decl.receiver_type)}\s*\)\s*{re.escape(callable_decl.name)}\s*\(",
+                    re.MULTILINE,
+                )
+            else:
+                decl_pattern = re.compile(
+                    rf"\bfunc\s+{re.escape(callable_decl.name)}\s*\(",
+                    re.MULTILINE,
+                )
+
+            for pkg_file in pkg.files:
+                source_file = Path(pkg_file)
+                if not source_file.is_absolute():
+                    if self.project_dir is None:
+                        continue
+                    source_file = Path(self.project_dir) / source_file
+                if not source_file.exists():
+                    continue
+                try:
+                    content = source_file.read_text(encoding="utf-8")
+                except Exception:
+                    continue
+                if decl_pattern.search(content):
+                    return source_file
+
+        return None
+
+    def _resolve_source_span(
+        self,
+        pkg: GoPackage,
+        callable_decl: GoCallableDecl,
+    ) -> Optional[Tuple[Path, int, int]]:
+        """Resolve source file and line span for a callable declaration."""
+        source_file = self._resolve_source_file(pkg, callable_decl)
+        if source_file is None:
+            return None
+
+        start_line: Optional[int] = None
+        end_line: Optional[int] = None
+
+        if callable_decl.position and callable_decl.position.start_line:
+            start_line = callable_decl.position.start_line
+            if callable_decl.end_position and callable_decl.end_position.end_line:
+                end_line = callable_decl.end_position.end_line
+
+        if start_line is None and callable_decl.body and callable_decl.body.start_line:
+            start_line = callable_decl.body.start_line
+        if end_line is None and callable_decl.body and callable_decl.body.end_line:
+            end_line = callable_decl.body.end_line
+
+        if start_line is None:
+            return None
+        if end_line is None:
+            end_line = start_line + 30
+
+        return source_file, start_line, end_line
+
+    def get_function_source(self, pkg_path: str, func_signature: str) -> Optional[str]:
+        """Retrieve the actual source code of a function/method from disk.
+
+        Uses symbol table metadata to extract source lines from disk.
+        Works with both detailed and minimal position modes.
+
+        Args:
+            pkg_path (str): The full package import path.
+            func_signature (str): The short function name or receiver signature (e.g. "Run", "(*Type).Method").
+
+        Returns:
+            Optional[str]: The source code string, or None if not found/readable.
+        """
+        if not self.application or not self.application.symbol_table:
+            return None
+
+        pkg = self.application.symbol_table.packages.get(pkg_path)
+        if not pkg:
+            return None
+
+        func_short = self._normalize_function_signature(func_signature)
+        matched_decl = self._find_callable_decl(pkg, func_short)
+        if matched_decl is None:
+            return None
+
+        source_span = self._resolve_source_span(pkg, matched_decl)
+        if source_span is None:
+            return None
+        source_file, start_line, end_line = source_span
+
+        try:
+            with open(source_file, "r", encoding="utf-8") as f:
+                lines = f.readlines()
+
+            start_line = max(1, start_line)
+            end_line = min(len(lines), end_line)
+            if start_line > end_line:
+                return None
+
+            body_lines = lines[start_line - 1 : end_line]
+            return "".join(body_lines).rstrip()
+        except Exception as e:
+            logger.warning(f"Failed to read source for {func_signature}: {e}")
+            return None
 
     def _init_codeanalyzer(self) -> GoAnalysis:
         """Initialize the codeanalyzer by running the analysis.
@@ -417,43 +602,3 @@ class GCodeanalyzer:
         if app.call_graph:
             return app.call_graph.model_dump_json(indent=2)
         return "{}"
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # Compact mode support
-    # ──────────────────────────────────────────────────────────────────────────
-
-    def _init_compact_analysis(self) -> Dict:
-        """Run analysis in compact mode and store raw dict (no Pydantic validation).
-
-        Returns:
-            Dict: The raw compact JSON data.
-        """
-        if self._compact_data is not None and not self.eager_analysis:
-            return self._compact_data
-
-        analysis_json_path = self._run_analysis()
-        try:
-            with open(analysis_json_path, "r", encoding="utf-8") as f:
-                self._compact_data = json.load(f)
-            logger.info("Successfully loaded compact analysis JSON")
-        except Exception as e:
-            logger.error(f"Failed to parse compact analysis.json: {e}")
-            raise CodeanalyzerExecutionException(
-                f"Failed to parse compact analysis.json: {e}"
-            ) from e
-
-        return self._compact_data
-
-    def get_compact_view(self) -> Dict:
-        """Return the compact analysis data as a raw dictionary.
-
-        The compact output uses abbreviated keys (p, n, d, c, e, etc.)
-        optimized for LLM consumption. This bypasses Pydantic validation
-        since the compact schema differs from the standard one.
-
-        Returns:
-            Dict: The raw compact JSON data.
-        """
-        if self._compact_data is None:
-            self._compact_data = self._init_compact_analysis()
-        return self._compact_data

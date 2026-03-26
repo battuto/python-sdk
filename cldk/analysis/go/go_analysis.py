@@ -59,7 +59,6 @@ class GoAnalysis:
         only_pkg: Optional[str] = None,
         emit_positions: str = "detailed",
         include_body: bool = False,
-        compact: bool = False,
     ) -> None:
         """Initialize the Go analysis backend.
 
@@ -89,7 +88,6 @@ class GoAnalysis:
         self.only_pkg = only_pkg
         self.emit_positions = emit_positions
         self.include_body = include_body
-        self.compact = compact
 
         # Initialize the analysis backend
         self.backend: GCodeanalyzer = GCodeanalyzer(
@@ -105,7 +103,6 @@ class GoAnalysis:
             only_pkg=self.only_pkg,
             emit_positions=self.emit_positions,
             include_body=self.include_body,
-            compact=self.compact,
         )
 
     def get_application_view(self) -> GoAnalysisModel:
@@ -159,6 +156,21 @@ class GoAnalysis:
             ...     print(pkg.name, pkg.path)
         """
         return self.backend.get_packages()
+
+    def get_function_source(self, pkg_path: str, func_signature: str) -> Optional[str]:
+        """Retrieve the actual source code of a function/method from disk.
+
+        Uses position information from the symbol table to read the lines
+        directly from the source file.
+
+        Args:
+            pkg_path (str): The full package import path.
+            func_signature (str): The short function name or receiver signature.
+
+        Returns:
+            Optional[str]: The source code string, or None if not found.
+        """
+        return self.backend.get_function_source(pkg_path, func_signature)
 
     def get_functions(self, package: Optional[str] = None) -> Dict[str, GoCallableDecl]:
         """Return functions/methods from the specified package or all packages.
@@ -423,14 +435,3 @@ class GoAnalysis:
             return app.sdg
 
         return app.sdg.packages.get(caller_package)
-
-    def get_compact_view(self) -> Dict:
-        """Return the compact analysis data as a raw dictionary.
-
-        Delegates to the backend's compact analysis. Only available when
-        the GoAnalysis was initialized with compact=True.
-
-        Returns:
-            Dict: The raw compact JSON data.
-        """
-        return self.backend.get_compact_view()
